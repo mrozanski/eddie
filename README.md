@@ -1,1 +1,3 @@
-# job-search-agent# eddie
+# eddie
+
+Guitar registry research agent
