@@ -206,7 +206,27 @@ class ProductSearchAgent:
                 if len(message.content) > 5000 or '<' in message.content:
                     # Summarize web content
                     summarized_content = self.content_summarizer.extract_key_info(message.content)
-                    processed_message = message.__class__(content=summarized_content)
+                    
+                    # Create a new message safely by copying all attributes and updating content
+                    try:
+                        # Get all the message attributes
+                        message_dict = message.dict() if hasattr(message, 'dict') else {}
+                        
+                        # Update the content
+                        message_dict['content'] = summarized_content
+                        
+                        # Create new message with all original attributes
+                        if hasattr(message, '__class__'):
+                            processed_message = message.__class__(**message_dict)
+                        else:
+                            # Fallback to AIMessage if we can't determine the class
+                            processed_message = AIMessage(content=summarized_content)
+                            
+                    except Exception as e:
+                        print(f"Warning: Could not recreate message, using fallback: {e}")
+                        # Fallback: create a simple message with just the content
+                        processed_message = AIMessage(content=summarized_content)
+                    
                     processed_messages.append(processed_message)
                 else:
                     processed_messages.append(message)
@@ -293,11 +313,25 @@ class ProductSearchAgent:
                 for tool_call in tool_calls:
                     print(f"  Executing: {tool_call['name']}")
                 
-                # Create a modified message with limited tool calls
-                modified_message = last_message.__class__(
-                    content=last_message.content,
-                    tool_calls=tool_calls
-                )
+                # Create a modified message with limited tool calls safely
+                try:
+                    # Get all the message attributes
+                    message_dict = last_message.dict() if hasattr(last_message, 'dict') else {}
+                    
+                    # Update the tool calls
+                    message_dict['tool_calls'] = tool_calls
+                    
+                    # Create new message with all original attributes
+                    if hasattr(last_message, '__class__'):
+                        modified_message = last_message.__class__(**message_dict)
+                    else:
+                        # Fallback to AIMessage if we can't determine the class
+                        modified_message = AIMessage(content=last_message.content, tool_calls=tool_calls)
+                        
+                except Exception as e:
+                    print(f"Warning: Could not recreate message, using fallback: {e}")
+                    # Fallback: create a simple message with just the content and tool calls
+                    modified_message = AIMessage(content=last_message.content, tool_calls=tool_calls)
                 modified_state = {"messages": state["messages"][:-1] + [modified_message]}
             else:
                 print("No tool calls to execute")
