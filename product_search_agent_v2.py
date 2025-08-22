@@ -4,7 +4,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from dotenv import load_dotenv
 from langgraph.prebuilt import ToolNode, tools_condition
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import PromptTemplate
@@ -14,13 +14,21 @@ from search_tools import playwright_tools
 from langchain_tavily import TavilySearch
 from langchain_community.agent_toolkits.openapi.toolkit import RequestsToolkit
 from langchain_community.utilities.requests import TextRequestsWrapper
+from langchain.retrievers.document_compressors import (
+    LLMChainExtractor, 
+    LLMChainFilter, 
+    EmbeddingsFilter,
+    DocumentCompressorPipeline
+)
+from langchain_community.document_transformers import EmbeddingsRedundantFilter
+from langchain_text_splitters import CharacterTextSplitter
+from langchain_core.documents import Document
 import uuid
 import asyncio
 from datetime import datetime
 from IPython.display import Image, display
 from models.product_models import ProductSearchInput
 import tiktoken
-import re
 
 load_dotenv(override=True)
 
@@ -32,62 +40,140 @@ class EvaluatorOutput(BaseModel):
     success_criteria_met: bool = Field(description="Whether the success criteria have been met")
     user_input_needed: bool = Field(description="True if more input is needed from the user, or clarifications, or the assistant is stuck")
 
-class ContentSummarizer(BaseModel):
-    """Helper class to summarize web content to reduce token usage"""
-    
-    @staticmethod
-    def extract_key_info(html_content: str, max_length: int = 2000) -> str:
-        """Extract key information from HTML content and truncate to reduce tokens"""
-        if not html_content:
-            return ""
-        
-        # Remove HTML tags and excessive whitespace
-        text = re.sub(r'<[^>]+>', ' ', html_content)
-        text = re.sub(r'\s+', ' ', text).strip()
-        
-        # Extract key information patterns (guitar specs, prices, etc.)
-        key_patterns = [
-            r'\b\d{4}\b',  # Years
-            r'\$\d+(?:,\d{3})*(?:\.\d{2})?',  # Prices
-            r'\b(?:mahogany|maple|rosewood|ebony|alder|ash|basswood)\b',  # Woods
-            r'\b(?:HH|SSS|HSS|HS|SS|H)\b',  # Pickup configurations
-            r'\b\d+(?:\.\d+)?\s*(?:inch|in|")\b',  # Measurements
-            r'\b(?:Fender|Gibson|PRS|Ibanez|ESP|Jackson|Schecter)\b',  # Manufacturers
-        ]
-        
-        extracted_info = []
-        for pattern in key_patterns:
-            matches = re.findall(pattern, text, re.IGNORECASE)
-            if matches:
-                extracted_info.extend(matches[:5])  # Limit matches per pattern
-        
-        # Combine extracted info with truncated content
-        summary = f"Key info: {', '.join(set(extracted_info))}\n\n"
-        summary += f"Content preview: {text[:max_length]}..."
-        
-        return summary
-
-class ContextManager:
-    """Manages conversation context to prevent token limit issues"""
+class LangChainContextManager:
+    """Uses LangChain's built-in contextual compression tools for better content management"""
     
     def __init__(self, max_tokens: int = 100000):
         self.max_tokens = max_tokens
         self.encoding = tiktoken.encoding_for_model("gpt-4o-mini")
+        
+        # Initialize LangChain compression tools
+        self.llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        self.embeddings = OpenAIEmbeddings()
+        
+        # Create document compressor pipeline
+        self._setup_compressors()
+    
+    def _setup_compressors(self):
+        """Setup LangChain compressors for different use cases"""
+        
+        # 1. LLM-based extractor for web content
+        self.content_extractor = LLMChainExtractor.from_llm(
+            self.llm
+        )
+        
+        # 2. LLM-based filter for relevance
+        self.relevance_filter = LLMChainFilter.from_llm(
+            self.llm,
+            top_n=3
+        )
+        
+        # 3. Embeddings-based filter for similarity
+        self.similarity_filter = EmbeddingsFilter(
+            embeddings=self.embeddings,
+            similarity_threshold=0.76
+        )
+        
+        # 4. Redundant content filter
+        self.redundant_filter = EmbeddingsRedundantFilter(
+            embeddings=self.embeddings
+        )
+        
+        # 5. Text splitter for large documents
+        self.text_splitter = CharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=100,
+            separator=". "
+        )
+        
+        # 6. Combined pipeline
+        self.pipeline_compressor = DocumentCompressorPipeline(
+            transformers=[
+                self.text_splitter,
+                self.redundant_filter,
+                self.similarity_filter
+            ]
+        )
     
     def count_tokens(self, text: str) -> int:
         """Count tokens in text"""
         return len(self.encoding.encode(text))
     
-    def truncate_messages(self, messages: List[Any], system_message: str) -> List[Any]:
-        """Truncate messages to stay within token limits"""
+    def compress_web_content(self, html_content: str, query: str = "guitar specifications") -> str:
+        """Use LangChain extractor to compress web content"""
+        if not html_content or len(html_content) < 1000:
+            return html_content
+        
+        try:
+            # Create a document from the HTML content
+            doc = Document(page_content=html_content, metadata={"source": "web"})
+            
+            # Use LLM extractor to get relevant information
+            compressed_docs = self.content_extractor.compress_documents([doc], query)
+            
+            if compressed_docs:
+                return compressed_docs[0].page_content
+            else:
+                # Fallback to simple text extraction
+                return self._simple_text_extraction(html_content)
+                
+        except Exception as e:
+            print(f"Compression failed, using fallback: {e}")
+            return self._simple_text_extraction(html_content)
+    
+    def _simple_text_extraction(self, html_content: str) -> str:
+        """Simple fallback text extraction"""
+        import re
+        # Remove HTML tags
+        text = re.sub(r'<[^>]+>', ' ', html_content)
+        # Remove excessive whitespace
+        text = re.sub(r'\s+', ' ', text).strip()
+        # Limit length
+        return text[:3000] + "..." if len(text) > 3000 else text
+    
+    def filter_messages(self, messages: List[Any], system_message: str) -> List[Any]:
+        """Filter messages using LangChain compressors"""
         if not messages:
             return messages
         
         # Count system message tokens
         system_tokens = self.count_tokens(system_message)
-        available_tokens = self.max_tokens - system_tokens - 1000  # Buffer for safety
+        available_tokens = self.max_tokens - system_tokens - 1000
         
-        # Start with most recent messages and work backwards
+        # Convert messages to documents for compression
+        docs = []
+        for msg in messages:
+            if hasattr(msg, 'content') and isinstance(msg.content, str):
+                docs.append(Document(
+                    page_content=msg.content,
+                    metadata={"type": type(msg).__name__, "message": msg}
+                ))
+        
+        if not docs:
+            return messages
+        
+        try:
+            # Use relevance filter to keep only relevant messages
+            filtered_docs = self.relevance_filter.compress_documents(
+                docs, 
+                "guitar research and specifications"
+            )
+            
+            # Convert back to messages
+            filtered_messages = []
+            for doc in filtered_docs:
+                if "message" in doc.metadata:
+                    filtered_messages.append(doc.metadata["message"])
+            
+            # Ensure we stay within token limits
+            return self._truncate_to_token_limit(filtered_messages, available_tokens)
+            
+        except Exception as e:
+            print(f"Message filtering failed, using fallback: {e}")
+            return self._truncate_to_token_limit(messages, available_tokens)
+    
+    def _truncate_to_token_limit(self, messages: List[Any], available_tokens: int) -> List[Any]:
+        """Truncate messages to stay within token limits"""
         truncated_messages = []
         current_tokens = 0
         
@@ -99,7 +185,7 @@ class ContextManager:
                 truncated_messages.insert(0, message)
                 current_tokens += message_tokens
             else:
-                # If this message is too large, truncate it
+                # Truncate this message if it's too large
                 if message_tokens > available_tokens - current_tokens:
                     truncated_content = self._truncate_content(message_content, available_tokens - current_tokens)
                     if hasattr(message, '__class__'):
@@ -117,12 +203,28 @@ class ContextManager:
         if len(tokens) <= max_tokens:
             return content
         
-        # Truncate and add ellipsis
-        truncated_tokens = tokens[:max_tokens-10]  # Leave room for ellipsis
+        truncated_tokens = tokens[:max_tokens-10]
         truncated_text = self.encoding.decode(truncated_tokens)
         return truncated_text + "... [truncated]"
 
-class ProductSearchAgent:
+class LangChainRequestsWrapper(TextRequestsWrapper):
+    """Custom requests wrapper using LangChain compression"""
+    
+    def __init__(self, context_manager: LangChainContextManager, **kwargs):
+        super().__init__(**kwargs)
+        self.context_manager = context_manager
+    
+    def get(self, url: str, **kwargs) -> str:
+        """Override get method to use LangChain compression"""
+        try:
+            content = super().get(url, **kwargs)
+            if len(content) > 1000:  # Only compress large content
+                return self.context_manager.compress_web_content(content)
+            return content
+        except Exception as e:
+            return f"Error fetching content from {url}: {str(e)}"
+
+class ProductSearchAgentV2:
     def __init__(self, input=None):
         self.worker_llm_with_tools = None
         self.evaluator_llm_with_output = None
@@ -133,25 +235,24 @@ class ProductSearchAgent:
         self.memory = MemorySaver()
         self.browser = None
         self.playwright = None
-        self.context_manager = ContextManager()
-        self.content_summarizer = ContentSummarizer()
-        self.max_tool_calls_per_iteration = 3  # Limit tool calls per iteration
-        # To-do: save criteria to file and load here
+        self.context_manager = LangChainContextManager()
+        self.max_tool_calls_per_iteration = 3
         self.search_success_criteria = ""
-        
-        # Store user preferences
         self.input = input
 
     async def setup(self):
         # Initialize Tavily Search Tool with reduced results
         tavily_search_tool = TavilySearch(
-            max_results=3,  # Reduced from 5 to 3
+            max_results=3,
             topic="general",
         )
         
-        # Initialize Requests Toolkit with content processing
-        from search_tools import get_summarizing_requests_tools
-        requests_tools = get_summarizing_requests_tools()
+        # Initialize Requests Toolkit with LangChain compression
+        requests_toolkit = RequestsToolkit(
+            requests_wrapper=LangChainRequestsWrapper(self.context_manager, headers={}),
+            allow_dangerous_requests=True,
+        )
+        requests_tools = requests_toolkit.get_tools()
         
         # Get playwright tools
         playwright_tools_list, self.browser, self.playwright = await playwright_tools()
@@ -166,29 +267,21 @@ class ProductSearchAgent:
         await self.build_graph()
 
     def _load_system_prompt(self) -> str:
-        """
-        Load the system prompt from the config file and format it with input values using LangChain PromptTemplate.
-        
-        Returns:
-            Formatted system prompt string
-        """
+        """Load and format the system prompt"""
         try:
             with open("config/guitar_registry_prompt.md", "r", encoding="utf-8") as f:
                 prompt_content = f.read()
             
-            # Create LangChain PromptTemplate
             prompt_template = PromptTemplate.from_template(prompt_content)
             
-            # Extract values from self.input (ProductSearchInput object)
             if self.input and hasattr(self.input, 'manufacturer') and hasattr(self.input, 'product_name') and hasattr(self.input, 'year'):
                 formatted_prompt = prompt_template.invoke({
                     "manufacturer": self.input.manufacturer,
-                    "model": self.input.product_name,  # Note: prompt uses 'model' but input has 'product_name'
+                    "model": self.input.product_name,
                     "year": self.input.year
                 })
                 return str(formatted_prompt)
             else:
-                # Return unformatted template if no input provided
                 return prompt_content
                 
         except FileNotFoundError:
@@ -196,65 +289,22 @@ class ProductSearchAgent:
         except Exception as e:
             return f"Error loading system prompt: {str(e)}"
 
-    def _process_tool_results(self, messages: List[Any]) -> List[Any]:
-        """Process and summarize tool results to reduce token usage"""
-        processed_messages = []
-        
-        for message in messages:
-            if hasattr(message, 'content') and isinstance(message.content, str):
-                # Check if this looks like web content (contains HTML or is very long)
-                if len(message.content) > 5000 or '<' in message.content:
-                    # Summarize web content
-                    summarized_content = self.content_summarizer.extract_key_info(message.content)
-                    
-                    # Create a new message safely by copying all attributes and updating content
-                    try:
-                        # Get all the message attributes
-                        message_dict = message.dict() if hasattr(message, 'dict') else {}
-                        
-                        # Update the content
-                        message_dict['content'] = summarized_content
-                        
-                        # Create new message with all original attributes
-                        if hasattr(message, '__class__'):
-                            processed_message = message.__class__(**message_dict)
-                        else:
-                            # Fallback to AIMessage if we can't determine the class
-                            processed_message = AIMessage(content=summarized_content)
-                            
-                    except Exception as e:
-                        print(f"Warning: Could not recreate message, using fallback: {e}")
-                        # Fallback: create a simple message with just the content
-                        processed_message = AIMessage(content=summarized_content)
-                    
-                    processed_messages.append(processed_message)
-                else:
-                    processed_messages.append(message)
-            else:
-                processed_messages.append(message)
-        
-        return processed_messages
-
     def worker(self, state: State) -> Dict[str, Any]:
         # Load and format the system prompt
         system_message = self._load_system_prompt()
         
-        # Get existing messages and process them
+        # Get existing messages and filter them using LangChain
         existing_messages = state.get("messages", [])
-        processed_messages = self._process_tool_results(existing_messages)
+        filtered_messages = self.context_manager.filter_messages(existing_messages, system_message)
         
-        # Truncate messages to stay within token limits
-        truncated_messages = self.context_manager.truncate_messages(processed_messages, system_message)
-        
-        # Combine system message with truncated messages
+        # Combine system message with filtered messages
         messages = [SystemMessage(content=system_message)]
-        messages.extend(truncated_messages)
+        messages.extend(filtered_messages)
         
-        print(f"=== WORKER INVOCATION ===")
+        print(f"=== WORKER INVOCATION (LangChain Version) ===")
         print(f"System prompt loaded: {len(system_message)} characters")
         print(f"Original messages: {len(existing_messages)}")
-        print(f"Processed messages: {len(processed_messages)}")
-        print(f"Truncated messages: {len(truncated_messages)}")
+        print(f"Filtered messages: {len(filtered_messages)}")
         print(f"Total messages in state: {len(messages)}")
         
         # Estimate token usage
@@ -289,13 +339,7 @@ class ProductSearchAgent:
             "messages": [response],
         }
 
-
-
     async def build_graph(self):
-        # Node
-        def tool_calling_llm(state: State):
-            return {"messages": [self.worker_llm_with_tools.invoke(state["messages"])]}
-        
         # Custom tool node with debugging and tool call limiting
         def debug_tool_node(state: State):
             print("=== TOOL NODE INVOCATION ===")
@@ -313,25 +357,11 @@ class ProductSearchAgent:
                 for tool_call in tool_calls:
                     print(f"  Executing: {tool_call['name']}")
                 
-                # Create a modified message with limited tool calls safely
-                try:
-                    # Get all the message attributes
-                    message_dict = last_message.dict() if hasattr(last_message, 'dict') else {}
-                    
-                    # Update the tool calls
-                    message_dict['tool_calls'] = tool_calls
-                    
-                    # Create new message with all original attributes
-                    if hasattr(last_message, '__class__'):
-                        modified_message = last_message.__class__(**message_dict)
-                    else:
-                        # Fallback to AIMessage if we can't determine the class
-                        modified_message = AIMessage(content=last_message.content, tool_calls=tool_calls)
-                        
-                except Exception as e:
-                    print(f"Warning: Could not recreate message, using fallback: {e}")
-                    # Fallback: create a simple message with just the content and tool calls
-                    modified_message = AIMessage(content=last_message.content, tool_calls=tool_calls)
+                # Create a modified message with limited tool calls
+                modified_message = last_message.__class__(
+                    content=last_message.content,
+                    tool_calls=tool_calls
+                )
                 modified_state = {"messages": state["messages"][:-1] + [modified_message]}
             else:
                 print("No tool calls to execute")
@@ -352,17 +382,9 @@ class ProductSearchAgent:
         graph_builder.add_edge(START, "worker")
         graph_builder.add_conditional_edges("worker", tools_condition)
         graph_builder.add_edge("tools", "worker")
-        # graph_builder.add_node("evaluator", self.search_evaluator)
-
-        # Add edges
-        # graph_builder.add_conditional_edges("worker", self.worker_router, {"tools": "worker", "evaluator": "evaluator"})
-        # graph_builder.add_edge("tools", "worker")
-        # graph_builder.add_conditional_edges("evaluator", self.route_based_on_evaluation, {"worker": "worker", "END": END})
-        # graph_builder.add_edge(START, "worker")
 
         # Compile the graph
         self.graph = graph_builder.compile(checkpointer=self.memory)
-        # display(Image(self.graph.get_graph(xray=True).draw_mermaid_png()))
 
     async def run_superstep(self, message):
         config = {"configurable": {"thread_id": self.job_search_id}}
@@ -383,4 +405,4 @@ class ProductSearchAgent:
                 # If no loop is running, do a direct run
                 asyncio.run(self.browser.close())
                 if self.playwright:
-                    asyncio.run(self.playwright.stop())
+                    asyncio.run(self.playwright.stop()) 
