@@ -17,11 +17,16 @@ async def main():
         print(f"❌ Error loading user pre: {e}")
         return
     
+    # Create agent with database integration enabled (default)
+    # To disable database integration, use: ProductSearchAgent(input=input, enable_db=False)
     agent = ProductSearchAgent(input=input)
     await agent.setup()
     messages =await agent.run_superstep(message="")
     for m in messages['messages']:
         m.pretty_print()
+    
+    # Clean up resources
+    agent.cleanup()
 
 if __name__ == "__main__":
     import asyncio

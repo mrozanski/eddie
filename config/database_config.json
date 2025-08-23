@@ -1,0 +1,21 @@
+{
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "database": "guitar_registry",
+    "username": "username",
+    "password": "password",
+    "connection_timeout": 5,
+    "pool_min_size": 1,
+    "pool_max_size": 10
+  },
+  "features": {
+    "enable_db_tools": true,
+    "fuzzy_match_threshold": 70,
+    "normalization_threshold": 85
+  },
+  "logging": {
+    "level": "INFO",
+    "enable_db_logging": true
+  }
+}

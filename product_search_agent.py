@@ -123,7 +123,7 @@ class ContextManager:
         return truncated_text + "... [truncated]"
 
 class ProductSearchAgent:
-    def __init__(self, input=None):
+    def __init__(self, input=None, enable_db: bool = True):
         self.worker_llm_with_tools = None
         self.evaluator_llm_with_output = None
         self.tools = None
@@ -141,6 +141,10 @@ class ProductSearchAgent:
         
         # Store user preferences
         self.input = input
+        
+        # Database integration settings
+        self.enable_db = enable_db
+        self.db_connection = None
 
     async def setup(self):
         # Initialize Tavily Search Tool with reduced results
@@ -158,6 +162,20 @@ class ProductSearchAgent:
         
         # Combine all tools
         self.tools = [tavily_search_tool] + requests_tools + playwright_tools_list
+        
+        # Add database tools if enabled
+        if self.enable_db:
+            try:
+                from db_tools import initialize_database, manufacturer_lookup_tool, manufacturer_search_tool
+                self.db_connection = await initialize_database()
+                if self.db_connection:
+                    db_tools = [manufacturer_lookup_tool, manufacturer_search_tool]
+                    self.tools.extend(db_tools)
+                    print(f"Database integration enabled with {len(db_tools)} tools")
+                else:
+                    print("Database integration failed to initialize, continuing without DB tools")
+            except Exception as e:
+                print(f"Failed to setup database tools: {e}. Continuing without database integration.")
         
         worker_llm = ChatOpenAI(model="gpt-4o-mini")
         self.worker_llm_with_tools = worker_llm.bind_tools(self.tools)
@@ -373,6 +391,7 @@ class ProductSearchAgent:
         return await self.graph.ainvoke(state, config=config)
     
     def cleanup(self):
+        # Clean up browser resources
         if self.browser:
             try:
                 loop = asyncio.get_running_loop()
@@ -384,3 +403,23 @@ class ProductSearchAgent:
                 asyncio.run(self.browser.close())
                 if self.playwright:
                     asyncio.run(self.playwright.stop())
+        
+        # Clean up database resources
+        if self.db_connection:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._cleanup_database())
+            except RuntimeError:
+                # If no loop is running, do a direct run
+                asyncio.run(self._cleanup_database())
+    
+    async def _cleanup_database(self):
+        """Helper method to clean up database connections"""
+        if self.db_connection:
+            try:
+                from db_tools import cleanup_database
+                await cleanup_database()
+                self.db_connection = None
+                print("Database connections cleaned up")
+            except Exception as e:
+                print(f"Error cleaning up database: {e}")
