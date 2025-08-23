@@ -32,7 +32,23 @@ Install with:
 pip install -e .
 ```
 
-### 2. Database Configuration
+### 2. Quick Setup (Recommended)
+
+For quick setup, use the automated setup script:
+
+```bash
+# Create .env file from template
+python setup_database.py --create-env
+
+# Edit .env file with your PostgreSQL credentials
+# Then run complete setup:
+python setup_database.py --setup-all
+
+# Test the integration
+python test_db_integration.py
+```
+
+### 3. Manual Database Configuration
 
 #### Option A: Environment Variables (Recommended)
 Create a `.env` file based on `.env.example`:
@@ -58,22 +74,48 @@ DB_PASSWORD=password
 #### Option C: Configuration File
 Update `config/database_config.json` with your database credentials.
 
-### 3. Database Schema
+### 4. Database Schema Setup
 
-The integration expects a table with manufacturer information. Example schema:
+#### Option A: Automated Setup (Recommended)
+```bash
+python setup_database.py --create-schema
+```
+
+#### Option B: Manual Setup
+Run the provided schema script:
+```bash
+psql -d guitar_registry -f database_schema.sql
+```
+
+#### Option C: Individual SQL Commands
+The integration expects tables with manufacturer information:
 
 ```sql
+-- Create guitars table
 CREATE TABLE guitars (
     id SERIAL PRIMARY KEY,
-    manufacturer VARCHAR(255),
-    model VARCHAR(255),
+    manufacturer VARCHAR(255) NOT NULL,
+    model VARCHAR(255) NOT NULL,
     year INTEGER,
-    -- other columns...
+    product_line VARCHAR(255),
+    -- ... more columns (see database_schema.sql for complete structure)
 );
 
--- Index for better performance
+-- Create manufacturers reference table
+CREATE TABLE manufacturers (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL UNIQUE,
+    country VARCHAR(100),
+    founded_year INTEGER,
+    -- ... more columns
+);
+
+-- Create indexes for better performance
 CREATE INDEX idx_guitars_manufacturer ON guitars(manufacturer);
+CREATE INDEX idx_manufacturers_name ON manufacturers(name);
 ```
+
+The complete schema with sample data is available in `database_schema.sql`.
 
 ## Usage
 
@@ -146,17 +188,33 @@ The database integration adds two new tools to the ProductSearchAgent:
 
 ## Testing
 
-Run the comprehensive test suite:
-
+### Quick Test
 ```bash
 python test_db_integration.py
 ```
 
-This tests:
+### Comprehensive Testing
+```bash
+# Check database connection
+python setup_database.py --check-connection
+
+# Verify database tables and data
+python setup_database.py --check-tables
+
+# Test integration tools directly
+python setup_database.py --test-integration
+
+# Run full test suite
+python test_db_integration.py
+```
+
+The test suite covers:
 - Direct database tool functionality
 - Agent with database integration enabled
 - Agent with database integration disabled
 - Graceful degradation when database is unavailable
+
+If tests fail due to missing database setup, follow the setup instructions provided in the test output.
 
 ## Configuration Options
 
@@ -214,17 +272,32 @@ The database integration includes comprehensive error handling:
 
 ### Common Issues
 
-1. **Database Connection Failed**
-   - Check connection string and credentials
-   - Verify database is running and accessible
+1. **"relation 'guitars' does not exist" Error**
+   ```bash
+   # Create database schema
+   python setup_database.py --create-schema
+   ```
+
+2. **Database Connection Failed**
+   - Check connection string and credentials in `.env` file
+   - Verify PostgreSQL is running: `pg_ctl status` or `systemctl status postgresql`
+   - Verify database exists: `psql -l | grep guitar_registry`
    - Check firewall/network settings
 
-2. **No Database Tools in Agent**
+3. **Placeholder Values in Connection String**
+   ```bash
+   # Update .env file with actual credentials
+   python setup_database.py --create-env
+   # Edit .env file, then test:
+   python setup_database.py --check-connection
+   ```
+
+4. **No Database Tools in Agent**
    - Verify `ENABLE_DB_TOOLS=true` in environment
    - Check for import errors in logs
-   - Ensure database dependencies installed
+   - Ensure database dependencies installed: `pip install asyncpg fuzzywuzzy[speedup]`
 
-3. **Poor Fuzzy Matching Results**
+5. **Poor Fuzzy Matching Results**
    - Adjust `fuzzy_match_threshold` in config
    - Check manufacturer data quality in database
    - Consider adding more manufacturer variations

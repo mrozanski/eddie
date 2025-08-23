@@ -34,7 +34,12 @@ async def test_database_tools():
         # Initialize database
         db = await initialize_database()
         if not db:
-            print("❌ Database initialization failed - skipping direct tool tests")
+            print("❌ Database initialization failed - this is expected if database is not configured")
+            print("   To fix this:")
+            print("   1. Set up PostgreSQL database named 'guitar_registry'")
+            print("   2. Run: psql -d guitar_registry -f database_schema.sql")
+            print("   3. Update .env file with database credentials")
+            print("   4. Set ENABLE_DB_TOOLS=true")
             return
         
         print("✅ Database connection established")
@@ -44,19 +49,26 @@ async def test_database_tools():
         test_names = ["Gibson Corp", "Fender Musical Instruments", "PRS Guitars", "Unknown Brand"]
         
         for name in test_names:
-            result = await manufacturer_lookup_tool.ainvoke({"manufacturer_name": name})
-            print(f"  Input: '{name}' → {result}")
+            try:
+                result = await manufacturer_lookup_tool.ainvoke({"manufacturer_name": name})
+                print(f"  Input: '{name}' → {result}")
+            except Exception as e:
+                print(f"  Input: '{name}' → Error: {e}")
         
         # Test manufacturer search
         print("\n🔍 Testing manufacturer search...")
         search_queries = ["Gib", "Fend", "PRS", "Martin"]
         
         for query in search_queries:
-            result = await manufacturer_search_tool.ainvoke({"query": query})
-            print(f"  Query: '{query}' → {result}")
+            try:
+                result = await manufacturer_search_tool.ainvoke({"query": query})
+                print(f"  Query: '{query}' → {result}")
+            except Exception as e:
+                print(f"  Query: '{query}' → Error: {e}")
         
     except Exception as e:
         print(f"❌ Error testing database tools: {e}")
+        print("   This indicates a code issue rather than database configuration")
 
 async def test_agent_with_database():
     """Test ProductSearchAgent with database integration enabled"""
@@ -180,6 +192,11 @@ async def main():
     print("✅ All tests completed!")
     print("\nNote: Some tests may show errors if the database is not configured.")
     print("This is expected behavior for demonstration purposes.")
+    print("\n💡 To set up the database for testing:")
+    print("   1. Run: python setup_database.py --create-env")
+    print("   2. Edit .env file with your PostgreSQL credentials")
+    print("   3. Run: python setup_database.py --setup-all")
+    print("   4. Re-run this test: python test_db_integration.py")
 
 if __name__ == "__main__":
     asyncio.run(main())

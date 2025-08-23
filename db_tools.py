@@ -50,8 +50,21 @@ class GuitarRegistryDB:
         
         try:
             async with self.pool.acquire() as connection:
-                # Assuming a manufacturers table or guitars table with manufacturer column
-                # Adjust the query based on actual database schema
+                # Check if guitars table exists first
+                table_check_query = """
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_schema = 'public' 
+                    AND table_name = 'guitars'
+                );
+                """
+                table_exists = await connection.fetchval(table_check_query)
+                
+                if not table_exists:
+                    logger.warning("Table 'guitars' does not exist. Please run database_schema.sql to create the database schema.")
+                    return []
+                
+                # Get distinct manufacturers from guitars table
                 query = """
                 SELECT DISTINCT manufacturer as name, 
                        COUNT(*) as guitar_count
@@ -256,6 +269,16 @@ async def initialize_database() -> Optional[GuitarRegistryDB]:
     
     try:
         connection_string = DatabaseConfig.get_connection_string()
+        
+        # Check if connection string has placeholder values
+        if 'username:password' in connection_string or 'localhost:5432/guitar_registry' in connection_string:
+            logger.warning("Database connection string contains placeholder values. Please configure actual database credentials in .env file.")
+            logger.info("To set up the database:")
+            logger.info("1. Create a PostgreSQL database named 'guitar_registry'")
+            logger.info("2. Run the database_schema.sql script to create tables")
+            logger.info("3. Update .env file with actual database credentials")
+            return None
+        
         db = GuitarRegistryDB(connection_string)
         await db.connect()
         set_db_instance(db)
@@ -263,6 +286,11 @@ async def initialize_database() -> Optional[GuitarRegistryDB]:
         return db
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
+        logger.info("Make sure:")
+        logger.info("1. PostgreSQL is running and accessible")
+        logger.info("2. Database 'guitar_registry' exists")
+        logger.info("3. Database credentials are correct in .env file")
+        logger.info("4. Database schema is created (run database_schema.sql)")
         return None
 
 async def cleanup_database():
