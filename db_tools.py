@@ -40,46 +40,52 @@ class GuitarRegistryDB:
     
     async def get_manufacturers(self) -> List[Dict[str, Any]]:
         """
-        Retrieve all manufacturer names for fuzzy matching.
+        Retrieve all manufacturers from the manufacturers table.
         
         Returns:
-            List of manufacturer dictionaries with name and id
+            List of manufacturer dictionaries with id, name, country, etc.
         """
         if not self.pool:
             raise Exception("Database connection not established. Call connect() first.")
         
         try:
             async with self.pool.acquire() as connection:
-                # Check if guitars table exists first
+                # Check if manufacturers table exists first
                 table_check_query = """
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables 
                     WHERE table_schema = 'public' 
-                    AND table_name = 'guitars'
+                    AND table_name = 'manufacturers'
                 );
                 """
                 table_exists = await connection.fetchval(table_check_query)
                 
                 if not table_exists:
-                    logger.warning("Table 'guitars' does not exist. Please run database_schema.sql to create the database schema.")
+                    logger.warning("Table 'manufacturers' does not exist. Please run the database schema to create the database tables.")
                     return []
                 
-                # Get distinct manufacturers from guitars table
+                # Get all manufacturers from manufacturers table
                 query = """
-                SELECT DISTINCT manufacturer as name, 
-                       COUNT(*) as guitar_count
-                FROM guitars 
-                WHERE manufacturer IS NOT NULL 
-                GROUP BY manufacturer
-                ORDER BY manufacturer
+                SELECT id, name, country, founded_year, website, status, notes,
+                       created_at, updated_at
+                FROM manufacturers 
+                WHERE status = 'active' OR status IS NULL
+                ORDER BY name
                 """
                 rows = await connection.fetch(query)
                 
                 manufacturers = []
                 for row in rows:
                     manufacturers.append({
+                        'id': str(row['id']),
                         'name': row['name'],
-                        'guitar_count': row['guitar_count']
+                        'country': row['country'],
+                        'founded_year': row['founded_year'],
+                        'website': row['website'],
+                        'status': row['status'],
+                        'notes': row['notes'],
+                        'created_at': row['created_at'],
+                        'updated_at': row['updated_at']
                     })
                 
                 logger.info(f"Retrieved {len(manufacturers)} manufacturers from database")
@@ -114,9 +120,12 @@ class GuitarRegistryDB:
             
             if best_score >= threshold:
                 matches.append({
+                    'id': manufacturer['id'],
                     'name': manufacturer['name'],
                     'score': best_score,
-                    'guitar_count': manufacturer['guitar_count']
+                    'country': manufacturer['country'],
+                    'founded_year': manufacturer['founded_year'],
+                    'status': manufacturer['status']
                 })
         
         # Sort by score descending
@@ -213,7 +222,9 @@ async def manufacturer_search_tool(query: str) -> str:
                 {
                     "name": match['name'],
                     "confidence": match['score'],
-                    "guitar_count": match['guitar_count']
+                    "country": match['country'],
+                    "founded_year": match['founded_year'],
+                    "status": match['status']
                 }
                 for match in matches[:5]  # Limit to top 5 matches
             ]
@@ -275,7 +286,7 @@ async def initialize_database() -> Optional[GuitarRegistryDB]:
             logger.warning("Database connection string contains placeholder values. Please configure actual database credentials in .env file.")
             logger.info("To set up the database:")
             logger.info("1. Create a PostgreSQL database named 'guitar_registry'")
-            logger.info("2. Run the database_schema.sql script to create tables")
+            logger.info("2. Ensure the manufacturers table exists in the database")
             logger.info("3. Update .env file with actual database credentials")
             return None
         
@@ -290,7 +301,7 @@ async def initialize_database() -> Optional[GuitarRegistryDB]:
         logger.info("1. PostgreSQL is running and accessible")
         logger.info("2. Database 'guitar_registry' exists")
         logger.info("3. Database credentials are correct in .env file")
-        logger.info("4. Database schema is created (run database_schema.sql)")
+        logger.info("4. Database schema exists with manufacturers table")
         return None
 
 async def cleanup_database():

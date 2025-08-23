@@ -16,7 +16,7 @@ relation "guitars" does not exist
 
 ## Solutions Implemented
 
-### ✅ 1. Database Schema Creation (`database_schema.sql`)
+### ✅ 1. Database Schema Integration
 
 Created a complete PostgreSQL schema with:
 - `guitars` table with comprehensive structure
@@ -47,7 +47,7 @@ SELECT EXISTS (
 table_exists = await connection.fetchval(table_check_query)
 
 if not table_exists:
-    logger.warning("Table 'guitars' does not exist. Please run database_schema.sql to create the database schema.")
+    logger.warning("Table 'manufacturers' does not exist. Please run the database schema to create the database tables.")
     return []
 ```
 
@@ -95,7 +95,7 @@ python setup_database.py --setup-all
 ## Files Created/Modified
 
 ### 📁 New Files
-- `database_schema.sql` - Complete database schema with sample data
+- Integration with existing PostgreSQL database schema
 - `setup_database.py` - Automated setup and testing script
 - `README_DATABASE_SETUP.md` - Quick start guide
 - `ISSUE_RESOLUTION_SUMMARY.md` - This summary
@@ -187,7 +187,7 @@ python test_db_integration.py                  # Full test suite
 
 - **Quick Start Guide**: `README_DATABASE_SETUP.md`
 - **Comprehensive Guide**: `DATABASE_INTEGRATION.md` 
-- **Schema Reference**: `database_schema.sql`
+- **Schema Reference**: Existing guitar_registry database
 - **Setup Automation**: `setup_database.py --help`
 
 ## Ready for Review

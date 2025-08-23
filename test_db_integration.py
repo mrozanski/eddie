@@ -37,7 +37,7 @@ async def test_database_tools():
             print("❌ Database initialization failed - this is expected if database is not configured")
             print("   To fix this:")
             print("   1. Set up PostgreSQL database named 'guitar_registry'")
-            print("   2. Run: psql -d guitar_registry -f database_schema.sql")
+            print("   2. Ensure the manufacturers table exists in the database")
             print("   3. Update .env file with database credentials")
             print("   4. Set ENABLE_DB_TOOLS=true")
             return

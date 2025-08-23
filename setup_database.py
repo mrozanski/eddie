@@ -58,13 +58,11 @@ async def check_connection():
         return False
 
 async def create_schema():
-    """Create database schema from SQL file"""
-    print("🏗️  Creating database schema...")
+    """Check if database schema exists - schema should already be created"""
+    print("🏗️  Checking database schema...")
     
-    schema_file = Path("database_schema.sql")
-    if not schema_file.exists():
-        print(f"❌ Schema file {schema_file} not found")
-        return False
+    # Database schema should already exist in the guitar_registry database
+    print("ℹ️  Database schema is expected to already exist")
     
     db_url = os.getenv('GUITAR_REGISTRY_DB_URL')
     if not db_url:
@@ -76,19 +74,27 @@ async def create_schema():
         db_url = f"postgresql://{username}:{password}@{host}:{port}/{database}"
     
     try:
-        # Read schema file
-        with open(schema_file, 'r') as f:
-            schema_sql = f.read()
-        
-        # Execute schema
+        # Check if manufacturers table exists
         conn = await asyncpg.connect(db_url)
-        await conn.execute(schema_sql)
+        
+        manufacturers_exists = await conn.fetchval("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'manufacturers'
+            );
+        """)
+        
         await conn.close()
         
-        print("✅ Database schema created successfully")
-        return True
+        if manufacturers_exists:
+            print("✅ Database schema exists with manufacturers table")
+            return True
+        else:
+            print("❌ Manufacturers table not found - please ensure the database schema is created")
+            return False
     except Exception as e:
-        print(f"❌ Failed to create schema: {e}")
+        print(f"❌ Failed to check schema: {e}")
         return False
 
 async def check_tables():
@@ -107,15 +113,6 @@ async def check_tables():
     try:
         conn = await asyncpg.connect(db_url)
         
-        # Check for guitars table
-        guitars_exists = await conn.fetchval("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_schema = 'public' 
-                AND table_name = 'guitars'
-            );
-        """)
-        
         # Check for manufacturers table
         manufacturers_exists = await conn.fetchval("""
             SELECT EXISTS (
@@ -126,24 +123,17 @@ async def check_tables():
         """)
         
         # Count records
-        guitar_count = 0
         manufacturer_count = 0
-        
-        if guitars_exists:
-            guitar_count = await conn.fetchval("SELECT COUNT(*) FROM guitars")
-            print(f"✅ 'guitars' table exists with {guitar_count} records")
-        else:
-            print("❌ 'guitars' table does not exist")
         
         if manufacturers_exists:
             manufacturer_count = await conn.fetchval("SELECT COUNT(*) FROM manufacturers")
             print(f"✅ 'manufacturers' table exists with {manufacturer_count} records")
         else:
-            print("❌ 'manufacturers' table does not exist")
+            print("❌ 'manufacturers' table does not exist - please run the database schema creation")
         
         await conn.close()
         
-        return guitars_exists and manufacturers_exists
+        return manufacturers_exists
         
     except Exception as e:
         print(f"❌ Failed to check tables: {e}")

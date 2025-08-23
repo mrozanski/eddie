@@ -84,38 +84,32 @@ python setup_database.py --create-schema
 #### Option B: Manual Setup
 Run the provided schema script:
 ```bash
-psql -d guitar_registry -f database_schema.sql
+psql -d guitar_registry -f create.sql
 ```
 
 #### Option C: Individual SQL Commands
-The integration expects tables with manufacturer information:
+The integration works with the existing manufacturers table:
 
 ```sql
--- Create guitars table
-CREATE TABLE guitars (
-    id SERIAL PRIMARY KEY,
-    manufacturer VARCHAR(255) NOT NULL,
-    model VARCHAR(255) NOT NULL,
-    year INTEGER,
-    product_line VARCHAR(255),
-    -- ... more columns (see database_schema.sql for complete structure)
-);
+-- The manufacturers table should already exist with this structure:
+-- CREATE TABLE manufacturers (
+--     id UUID PRIMARY KEY DEFAULT uuid_generate_v7(),
+--     name VARCHAR(100) NOT NULL,
+--     country VARCHAR(50),
+--     founded_year INTEGER,
+--     website VARCHAR(255),
+--     status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'defunct', 'acquired')),
+--     notes TEXT,
+--     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+--     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+-- );
 
--- Create manufacturers reference table
-CREATE TABLE manufacturers (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL UNIQUE,
-    country VARCHAR(100),
-    founded_year INTEGER,
-    -- ... more columns
-);
-
--- Create indexes for better performance
-CREATE INDEX idx_guitars_manufacturer ON guitars(manufacturer);
-CREATE INDEX idx_manufacturers_name ON manufacturers(name);
+-- Ensure indexes exist for better performance
+CREATE INDEX IF NOT EXISTS idx_manufacturers_name ON manufacturers(name);
+CREATE INDEX IF NOT EXISTS idx_manufacturers_status ON manufacturers(status);
 ```
 
-The complete schema with sample data is available in `database_schema.sql`.
+The database integration uses the existing PostgreSQL schema from the guitar registry database.
 
 ## Usage
 

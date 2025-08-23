@@ -42,7 +42,7 @@ The original error occurred because:
 
 ## Solutions Implemented
 
-### 1. Database Schema Creation (`database_schema.sql`)
+### 1. Database Schema Verification
 - Complete PostgreSQL schema with `guitars` and `manufacturers` tables
 - Sample data for testing manufacturer normalization
 - Proper indexes for performance
@@ -76,7 +76,7 @@ The original error occurred because:
 ## Files Added/Modified
 
 ### New Files
-- `database_schema.sql` - Complete database schema with sample data
+- The database schema should already exist in the guitar_registry database
 - `setup_database.py` - Automated setup and testing script
 - `.env.example` - Environment configuration template
 - `README_DATABASE_SETUP.md` - This setup guide
