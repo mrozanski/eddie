@@ -193,10 +193,11 @@ async def main():
     print("\nNote: Some tests may show errors if the database is not configured.")
     print("This is expected behavior for demonstration purposes.")
     print("\n💡 To set up the database for testing:")
-    print("   1. Run: python setup_database.py --create-env")
-    print("   2. Edit .env file with your PostgreSQL credentials")
-    print("   3. Run: python setup_database.py --setup-all")
-    print("   4. Re-run this test: python test_db_integration.py")
+    print("   1. Create a .env file with your PostgreSQL credentials (see .env.example if available)")
+    print("   2. Ensure PostgreSQL is running with a database named 'guitar_registry'")
+    print("   3. Ensure the manufacturers table exists in the database")
+    print("   4. Set ENABLE_DB_TOOLS=true in your .env file")
+    print("   5. Re-run this test: python test_db_integration.py")
 
 if __name__ == "__main__":
     asyncio.run(main())

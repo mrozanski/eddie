@@ -6,9 +6,9 @@ async def main():
     # Load user criteria
     try:
         input = ProductSearchInput(
-            manufacturer="Fender",
-            product_name="Mustang",
-            year="1965"
+            manufacturer="Gibson",
+            product_name="Les Paul Junior Double Cut Jr DC",
+            year="2025"
         )
         print(f"🎯 Manufacturer: {input.manufacturer}")
         print(f"🎯 Model: {input.product_name}")
@@ -21,7 +21,7 @@ async def main():
     # To disable database integration, use: ProductSearchAgent(input=input, enable_db=False)
     agent = ProductSearchAgent(input=input)
     await agent.setup()
-    messages =await agent.run_superstep(message="")
+    messages = await agent.run_superstep(message="")
     for m in messages['messages']:
         m.pretty_print()
     

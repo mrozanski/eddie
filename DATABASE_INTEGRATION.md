@@ -38,11 +38,13 @@ For quick setup, use the automated setup script:
 
 ```bash
 # Create .env file from template
-python setup_database.py --create-env
+cp .env.example .env
 
 # Edit .env file with your PostgreSQL credentials
 # Then run complete setup:
-python setup_database.py --setup-all
+# 1. Create PostgreSQL database named 'guitar_registry'
+# 2. Ensure the manufacturers table exists in the database
+# 3. Set ENABLE_DB_TOOLS=true in your .env file
 
 # Test the integration
 python test_db_integration.py
@@ -76,9 +78,11 @@ Update `config/database_config.json` with your database credentials.
 
 ### 4. Database Schema Setup
 
-#### Option A: Automated Setup (Recommended)
+#### Option A: Manual Setup (Recommended)
 ```bash
-python setup_database.py --create-schema
+# Create PostgreSQL database named 'guitar_registry'
+# Ensure the manufacturers table exists in the database
+# Set ENABLE_DB_TOOLS=true in your .env file
 ```
 
 #### Option B: Manual Setup
