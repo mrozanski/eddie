@@ -95,30 +95,51 @@ class GuitarRegistryDB:
             logger.error(f"Error retrieving manufacturers: {e}")
             return []
     
-    async def find_manufacturer_matches(self, query: str, threshold: int = 70) -> List[Dict[str, Any]]:
-        """
-        Search for similar manufacturer names using fuzzy matching.
-        
-        Args:
-            query: Search query for manufacturer name
-            threshold: Minimum similarity score (0-100)
-            
-        Returns:
-            List of similar manufacturer names with confidence scores
-        """
-        manufacturers = await self.get_manufacturers()
+    async def close(self):
+        """Close database connection pool"""
+        if self.pool:
+            await self.pool.close()
+            logger.info("Database connection pool closed")
+
+# Global database instance and manufacturer cache
+_db_instance: Optional[GuitarRegistryDB] = None
+_manufacturer_cache: Optional[List[Dict[str, Any]]] = None
+
+def get_db_instance() -> Optional[GuitarRegistryDB]:
+    """Get the global database instance"""
+    return _db_instance
+
+def set_db_instance(db: GuitarRegistryDB):
+    """Set the global database instance"""
+    global _db_instance
+    _db_instance = db
+
+def get_manufacturer_cache() -> Optional[List[Dict[str, Any]]]:
+    """Get the cached manufacturer data"""
+    return _manufacturer_cache
+
+def set_manufacturer_cache(manufacturers: List[Dict[str, Any]]):
+    """Set the cached manufacturer data"""
+    global _manufacturer_cache
+    _manufacturer_cache = manufacturers
+
+def _sync_manufacturer_lookup(manufacturer_name: str) -> str:
+    """Synchronous version of manufacturer lookup for tools using cached data"""
+    
+    # First try to use cached data
+    manufacturers = get_manufacturer_cache()
+    if manufacturers:
+        # Perform fuzzy matching on cached data
         matches = []
         
         for manufacturer in manufacturers:
-            # Calculate fuzzy match score
-            similarity = fuzz.ratio(query.lower(), manufacturer['name'].lower())
-            partial_similarity = fuzz.partial_ratio(query.lower(), manufacturer['name'].lower())
-            token_similarity = fuzz.token_sort_ratio(query.lower(), manufacturer['name'].lower())
+            similarity = fuzz.ratio(manufacturer_name.lower(), manufacturer['name'].lower())
+            partial_similarity = fuzz.partial_ratio(manufacturer_name.lower(), manufacturer['name'].lower())
+            token_similarity = fuzz.token_sort_ratio(manufacturer_name.lower(), manufacturer['name'].lower())
             
-            # Use the highest similarity score
             best_score = max(similarity, partial_similarity, token_similarity)
             
-            if best_score >= threshold:
+            if best_score >= 85:  # Use threshold of 85 for normalization
                 matches.append({
                     'id': manufacturer['id'],
                     'name': manufacturer['name'],
@@ -130,89 +151,96 @@ class GuitarRegistryDB:
         
         # Sort by score descending
         matches.sort(key=lambda x: x['score'], reverse=True)
-        logger.info(f"Found {len(matches)} matches for query '{query}'")
-        
-        return matches
-    
-    async def normalize_manufacturer_name(self, input_name: str) -> str:
-        """
-        Return standardized manufacturer name from variations.
-        
-        Args:
-            input_name: Raw manufacturer name from research
-            
-        Returns:
-            Standardized manufacturer name or original if no match found
-        """
-        matches = await self.find_manufacturer_matches(input_name, threshold=85)
         
         if matches:
-            # Return the best match
             normalized_name = matches[0]['name']
-            logger.info(f"Normalized '{input_name}' to '{normalized_name}' (score: {matches[0]['score']})")
+            logger.info(f"Normalized '{manufacturer_name}' to '{normalized_name}' via cache (score: {matches[0]['score']})")
             return normalized_name
-        else:
-            logger.info(f"No normalization found for '{input_name}', returning original")
-            return input_name
     
-    async def close(self):
-        """Close database connection pool"""
-        if self.pool:
-            await self.pool.close()
-            logger.info("Database connection pool closed")
-
-# Global database instance
-_db_instance: Optional[GuitarRegistryDB] = None
-
-def get_db_instance() -> Optional[GuitarRegistryDB]:
-    """Get the global database instance"""
-    return _db_instance
-
-def set_db_instance(db: GuitarRegistryDB):
-    """Set the global database instance"""
-    global _db_instance
-    _db_instance = db
-
-def _sync_manufacturer_lookup(manufacturer_name: str) -> str:
-    """Synchronous version of manufacturer lookup for tools"""
+    # Fallback to database if cache not available
     db = get_db_instance()
     if not db:
         logger.warning("Database not available for manufacturer lookup")
         return manufacturer_name
     
-    # Hardcoded mapping based on current database contents
-    # This avoids the async/concurrency issues in tool execution context
-    manufacturer_mappings = {
-        "gibson": "Gibson Guitar Corporation",
-        "gibson corp": "Gibson Guitar Corporation", 
-        "gibson corporation": "Gibson Guitar Corporation",
-        "gibson guitar": "Gibson Guitar Corporation",
-        "gibson guitar corp": "Gibson Guitar Corporation",
-        "gibson guitar corporation": "Gibson Guitar Corporation",
-        "fender": "Fender Musical Instruments Corporation",
-        "fender musical": "Fender Musical Instruments Corporation",
-        "fender musical instruments": "Fender Musical Instruments Corporation",
-        "fender musical instruments corporation": "Fender Musical Instruments Corporation",
-        "epiphone": "Epiphone Company",
-        "epiphone company": "Epiphone Company"
-    }
-    
-    # Try exact match first
-    normalized_input = manufacturer_name.lower().strip()
-    if normalized_input in manufacturer_mappings:
-        result = manufacturer_mappings[normalized_input]
-        logger.info(f"Normalized '{manufacturer_name}' to '{result}' via direct mapping")
-        return result
-    
-    # Try partial matching
-    for key, value in manufacturer_mappings.items():
-        if normalized_input in key or key in normalized_input:
-            logger.info(f"Normalized '{manufacturer_name}' to '{value}' via partial matching")
-            return value
-    
-    # No match found, return original
-    logger.info(f"No normalization found for '{manufacturer_name}', returning original")
-    return manufacturer_name
+    try:
+        # Create a completely isolated async execution context
+        import concurrent.futures
+        
+        def run_async_lookup():
+            """Run the async lookup in a completely isolated context"""
+            # Create a new event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                # Create a new database connection for this operation
+                import asyncpg
+                from db_tools import DatabaseConfig
+                
+                # Get connection string
+                connection_string = DatabaseConfig.get_connection_string()
+                
+                async def isolated_lookup():
+                    # Create a fresh connection for this operation
+                    conn = await asyncpg.connect(connection_string)
+                    try:
+                        # Get manufacturers directly
+                        rows = await conn.fetch("""
+                            SELECT id, name, country, founded_year, website, status, notes
+                            FROM manufacturers 
+                            WHERE status = 'active' OR status IS NULL
+                            ORDER BY name
+                        """)
+                        
+                        manufacturers = [dict(row) for row in rows]
+                        
+                        # Perform fuzzy matching
+                        matches = []
+                        
+                        for manufacturer in manufacturers:
+                            similarity = fuzz.ratio(manufacturer_name.lower(), manufacturer['name'].lower())
+                            partial_similarity = fuzz.partial_ratio(manufacturer_name.lower(), manufacturer['name'].lower())
+                            token_similarity = fuzz.token_sort_ratio(manufacturer_name.lower(), manufacturer['name'].lower())
+                            
+                            best_score = max(similarity, partial_similarity, token_similarity)
+                            
+                            if best_score >= 85:  # Use threshold of 85 for normalization
+                                matches.append({
+                                    'id': manufacturer['id'],
+                                    'name': manufacturer['name'],
+                                    'score': best_score,
+                                    'country': manufacturer['country'],
+                                    'founded_year': manufacturer['founded_year'],
+                                    'status': manufacturer['status']
+                                })
+                        
+                        # Sort by score descending
+                        matches.sort(key=lambda x: x['score'], reverse=True)
+                        
+                        if matches:
+                            return matches[0]['name']
+                        else:
+                            return manufacturer_name
+                            
+                    finally:
+                        await conn.close()
+                
+                return loop.run_until_complete(isolated_lookup())
+                
+            finally:
+                loop.close()
+        
+        # Execute in a separate thread to avoid any event loop conflicts
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_async_lookup)
+            normalized_name = future.result(timeout=15)
+        
+        return normalized_name
+        
+    except Exception as e:
+        logger.error(f"Error in manufacturer lookup: {e}")
+        # Fallback to original name if database lookup fails
+        return manufacturer_name
 
 @tool
 def manufacturer_lookup_tool(manufacturer_name: str) -> str:
@@ -231,59 +259,6 @@ def manufacturer_lookup_tool(manufacturer_name: str) -> str:
     except Exception as e:
         logger.error(f"Error in manufacturer lookup: {e}")
         return f"Error normalizing '{manufacturer_name}': {str(e)}"
-
-@tool
-def manufacturer_search_tool(query: str) -> str:
-    """
-    Find similar manufacturer names for fuzzy matching.
-    
-    Args:
-        query: Search query for manufacturer names
-        
-    Returns:
-        JSON string with list of similar manufacturer names with confidence scores
-    """
-    try:
-        # Available manufacturers from database
-        manufacturers = [
-            {"name": "Gibson Guitar Corporation", "country": "USA", "founded_year": 1902, "status": "active"},
-            {"name": "Fender Musical Instruments Corporation", "country": "USA", "founded_year": 1946, "status": "active"},
-            {"name": "Epiphone Company", "country": "USA", "founded_year": 1873, "status": "active"}
-        ]
-        
-        # Simple fuzzy matching
-        from fuzzywuzzy import fuzz
-        matches = []
-        
-        for manufacturer in manufacturers:
-            similarity = fuzz.ratio(query.lower(), manufacturer['name'].lower())
-            partial_similarity = fuzz.partial_ratio(query.lower(), manufacturer['name'].lower())
-            token_similarity = fuzz.token_sort_ratio(query.lower(), manufacturer['name'].lower())
-            
-            best_score = max(similarity, partial_similarity, token_similarity)
-            
-            if best_score >= 70:  # Use threshold of 70 for search
-                matches.append({
-                    "name": manufacturer['name'],
-                    "confidence": best_score,
-                    "country": manufacturer['country'],
-                    "founded_year": manufacturer['founded_year'],
-                    "status": manufacturer['status']
-                })
-        
-        # Sort by confidence score
-        matches.sort(key=lambda x: x['confidence'], reverse=True)
-        
-        results = {
-            "query": query,
-            "matches": matches[:5]  # Limit to top 5 matches
-        }
-        
-        return json.dumps(results, indent=2)
-        
-    except Exception as e:
-        logger.error(f"Error in manufacturer search: {e}")
-        return json.dumps({"error": f"Search failed: {str(e)}"})
 
 # Database configuration management
 class DatabaseConfig:
@@ -342,6 +317,15 @@ async def initialize_database() -> Optional[GuitarRegistryDB]:
         db = GuitarRegistryDB(connection_string)
         await db.connect()
         set_db_instance(db)
+        
+        # Pre-load manufacturers into cache for batch processing
+        try:
+            manufacturers = await db.get_manufacturers()
+            set_manufacturer_cache(manufacturers)
+            logger.info(f"Pre-loaded {len(manufacturers)} manufacturers into cache for batch processing")
+        except Exception as e:
+            logger.warning(f"Could not pre-load manufacturers into cache: {e}")
+        
         logger.info("Database integration initialized successfully")
         return db
     except Exception as e:
@@ -359,4 +343,5 @@ async def cleanup_database():
     if db:
         await db.close()
         set_db_instance(None)
-        logger.info("Database connections cleaned up")
+        set_manufacturer_cache(None)  # Clear cache
+        logger.info("Database connections and cache cleaned up")

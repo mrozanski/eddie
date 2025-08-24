@@ -166,12 +166,12 @@ class ProductSearchAgent:
         # Add database tools if enabled
         if self.enable_db:
             try:
-                from db_tools import initialize_database, manufacturer_lookup_tool, manufacturer_search_tool
+                from db_tools import initialize_database, manufacturer_lookup_tool
                 self.db_connection = await initialize_database()
                 if self.db_connection:
-                    db_tools = [manufacturer_lookup_tool, manufacturer_search_tool]
+                    db_tools = [manufacturer_lookup_tool]
                     self.tools.extend(db_tools)
-                    print(f"Database integration enabled with {len(db_tools)} tools")
+                    print(f"Database integration enabled with {len(db_tools)} tool")
                 else:
                     print("Database integration failed to initialize, continuing without DB tools")
             except Exception as e:
