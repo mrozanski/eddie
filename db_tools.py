@@ -109,8 +109,12 @@ def get_db_instance() -> Optional[GuitarRegistryDB]:
     """Get the global database instance"""
     return _db_instance
 
-def set_db_instance(db: GuitarRegistryDB):
-    """Set the global database instance"""
+def set_db_instance(db: Optional[GuitarRegistryDB]):
+    """Set the global database instance
+    
+    Args:
+        db: GuitarRegistryDB instance or None to clear the global instance
+    """
     global _db_instance
     _db_instance = db
 
@@ -118,8 +122,12 @@ def get_manufacturer_cache() -> Optional[List[Dict[str, Any]]]:
     """Get the cached manufacturer data"""
     return _manufacturer_cache
 
-def set_manufacturer_cache(manufacturers: List[Dict[str, Any]]):
-    """Set the cached manufacturer data"""
+def set_manufacturer_cache(manufacturers: Optional[List[Dict[str, Any]]]):
+    """Set the cached manufacturer data
+    
+    Args:
+        manufacturers: List of manufacturer dictionaries or None to clear the cache
+    """
     global _manufacturer_cache
     _manufacturer_cache = manufacturers
 
