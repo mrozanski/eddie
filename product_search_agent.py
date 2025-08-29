@@ -390,28 +390,32 @@ class ProductSearchAgent:
         }
         return await self.graph.ainvoke(state, config=config)
     
-    def cleanup(self):
+    async def cleanup(self):
+        """Clean up all resources properly"""
         # Clean up browser resources
         if self.browser:
             try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(self.browser.close())
-                if self.playwright:
-                    loop.create_task(self.playwright.stop())
-            except RuntimeError:
-                # If no loop is running, do a direct run
-                asyncio.run(self.browser.close())
-                if self.playwright:
-                    asyncio.run(self.playwright.stop())
+                await self.browser.close()
+            except Exception as e:
+                print(f"Warning: Error closing browser: {e}")
+        
+        if self.playwright:
+            try:
+                await self.playwright.stop()
+            except Exception as e:
+                print(f"Warning: Error stopping playwright: {e}")
         
         # Clean up database resources
         if self.db_connection:
             try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(self._cleanup_database())
-            except RuntimeError:
-                # If no loop is running, do a direct run
-                asyncio.run(self._cleanup_database())
+                await self._cleanup_database()
+            except Exception as e:
+                print(f"Warning: Error cleaning up database: {e}")
+        
+        # Clear references
+        self.browser = None
+        self.playwright = None
+        self.db_connection = None
     
     async def _cleanup_database(self):
         """Helper method to clean up database connections"""

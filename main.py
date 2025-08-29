@@ -6,9 +6,9 @@ async def main():
     # Load user criteria
     try:
         input = ProductSearchInput(
-            manufacturer="Gibson",
-            product_name="Les Paul Junior Double Cut Jr DC",
-            year="2025"
+            manufacturer="G&L Guitars",
+            product_name="ullerton Deluxe ASAT Classic",
+            year="2017"
         )
         print(f"🎯 Manufacturer: {input.manufacturer}")
         print(f"🎯 Model: {input.product_name}")
@@ -25,8 +25,8 @@ async def main():
     for m in messages['messages']:
         m.pretty_print()
     
-    # Clean up resources
-    agent.cleanup()
+    # Clean up resources properly before event loop closes
+    await agent.cleanup()
 
 if __name__ == "__main__":
     import asyncio
