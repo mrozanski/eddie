@@ -18,7 +18,7 @@ import uuid
 import asyncio
 from datetime import datetime
 from IPython.display import Image, display
-from models.product_models import ProductSearchInput
+from models.product_models import ProductSearchInput, GuitarRegistryOutput
 import tiktoken
 import re
 
@@ -123,8 +123,9 @@ class ContextManager:
         return truncated_text + "... [truncated]"
 
 class ProductSearchAgent:
-    def __init__(self, input=None, enable_db: bool = True):
+    def __init__(self, input=None, enable_db: bool = True, structured_output: bool = False):
         self.worker_llm_with_tools = None
+        self.worker_llm_structured = None
         self.evaluator_llm_with_output = None
         self.tools = None
         self.llm_with_tools = None
@@ -145,6 +146,9 @@ class ProductSearchAgent:
         # Database integration settings
         self.enable_db = enable_db
         self.db_connection = None
+        
+        # Structured output settings
+        self.structured_output = structured_output
 
     async def setup(self):
         # Initialize Tavily Search Tool with reduced results
@@ -179,6 +183,11 @@ class ProductSearchAgent:
         
         worker_llm = ChatOpenAI(model="gpt-4o-mini")
         self.worker_llm_with_tools = worker_llm.bind_tools(self.tools)
+        
+        # Create structured output version for JSON generation
+        if self.structured_output:
+            self.worker_llm_structured = worker_llm.with_structured_output(GuitarRegistryOutput)
+        
         evaluator_llm = ChatOpenAI(model="gpt-4o-mini")
         self.evaluator_llm_with_output = evaluator_llm.with_structured_output(EvaluatorOutput)
         await self.build_graph()
@@ -228,7 +237,7 @@ class ProductSearchAgent:
                     # Create a new message safely by copying all attributes and updating content
                     try:
                         # Get all the message attributes
-                        message_dict = message.dict() if hasattr(message, 'dict') else {}
+                        message_dict = message.model_dump() if hasattr(message, 'model_dump') else {}
                         
                         # Update the content
                         message_dict['content'] = summarized_content
@@ -334,7 +343,7 @@ class ProductSearchAgent:
                 # Create a modified message with limited tool calls safely
                 try:
                     # Get all the message attributes
-                    message_dict = last_message.dict() if hasattr(last_message, 'dict') else {}
+                    message_dict = last_message.model_dump() if hasattr(last_message, 'model_dump') else {}
                     
                     # Update the tool calls
                     message_dict['tool_calls'] = tool_calls
@@ -389,6 +398,48 @@ class ProductSearchAgent:
             "messages": message
         }
         return await self.graph.ainvoke(state, config=config)
+    
+    async def generate_structured_output(self) -> GuitarRegistryOutput:
+        """
+        Generate structured JSON output based on the research data collected.
+        This should be called after running the research workflow.
+        """
+        if not self.structured_output or not self.worker_llm_structured:
+            raise ValueError("Structured output not enabled. Initialize with structured_output=True")
+        
+        config = {"configurable": {"thread_id": self.job_search_id}}
+        
+        # Get the conversation history from memory
+        state = await self.graph.aget_state(config)
+        messages = state.values.get("messages", [])
+        
+        # Load and format the system prompt for JSON generation
+        system_message = self._load_system_prompt()
+        
+        # Create a specific prompt for JSON generation
+        json_prompt = """
+Based on all the research data collected above, generate a complete JSON output for the guitar registry system.
+
+IMPORTANT INSTRUCTIONS:
+1. Extract all relevant information about the manufacturer, model, and individual guitar details
+2. Use the complete model reference (Option A) if you have manufacturer name, model name, and year
+3. If missing some model details, use fallback options appropriately
+4. Include source attribution for where the information was found
+5. Fill in as many fields as possible with accurate information from your research
+6. Use "Research Analysis" as the source name
+7. Set today's date for date_accessed if including URLs
+
+Generate the structured JSON output now:
+"""
+        
+        # Combine system message, research history, and JSON generation prompt
+        full_messages = [SystemMessage(content=system_message)]
+        full_messages.extend(messages)
+        full_messages.append(HumanMessage(content=json_prompt))
+        
+        # Generate structured output
+        result = await self.worker_llm_structured.ainvoke(full_messages)
+        return result
     
     async def cleanup(self):
         """Clean up all resources properly"""
