@@ -15,6 +15,8 @@ dependencies = [
     "python-dotenv",
     "pydantic",
     "tiktoken",
+    "asyncpg",
+    "fuzzywuzzy[speedup]",
 ]
 requires-python = ">=3.9"
 

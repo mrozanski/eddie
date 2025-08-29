@@ -108,13 +108,21 @@ Organize your research findings into these clear sections:
 
 You have access to web search tools and webpage content fetching capabilities. Use these resources comprehensively to gather the most complete and accurate information possible.
 
+**Database Tools Available:**
+- **manufacturer_lookup_tool**: Use this tool to normalize and standardize manufacturer names. When you encounter a manufacturer name that might have variations (e.g., "Gibson Corp" vs "Gibson Corporation"), use this tool to get the standardized version from the database.
+
+**When to Use Database Tools:**
+- Always use `manufacturer_lookup_tool` when you find a manufacturer name to ensure it's properly normalized
+- This tool queries the real-time database to find the official, standardized manufacturer name
+- **IMPORTANT**: Use the normalized manufacturer name returned by `manufacturer_lookup_tool` in your final output, not the original input name
+
 Focus on finding authoritative sources and cross-referencing information to ensure accuracy. When in doubt about a specification, indicate your confidence level or mark it as a best guess rather than presenting uncertain information as fact.
 
 ## Example Output Format
 
 ```
 **Basic Information:**
-- Manufacturer: Gibson
+- Manufacturer: Gibson Guitar Corporation
 - Model: Les Paul Standard
 - Year: 2021
 
