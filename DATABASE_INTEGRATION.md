@@ -153,36 +153,24 @@ agent = ProductSearchAgent(input=input_data, enable_db=False)
 ### Direct Database Tool Usage
 
 ```python
-from db_tools import manufacturer_lookup_tool, manufacturer_search_tool
+from db_tools import manufacturer_lookup_tool
 
 # Normalize manufacturer name
 result = await manufacturer_lookup_tool.ainvoke({
     "manufacturer_name": "Gibson Corporation"
 })
 # Returns: "Normalized manufacturer name: Gibson"
-
-# Search for similar manufacturers
-result = await manufacturer_search_tool.ainvoke({
-    "query": "Gib"
-})
-# Returns JSON with matching manufacturers and confidence scores
 ```
 
 ## Available Tools
 
-The database integration adds two new tools to the ProductSearchAgent:
+The database integration adds one new tool to the ProductSearchAgent:
 
 ### 1. `manufacturer_lookup_tool`
 - **Purpose**: Normalize manufacturer names using database lookup
 - **Input**: Raw manufacturer name from research
 - **Output**: Standardized manufacturer name
 - **Usage**: Agent calls this automatically when finding manufacturer information
-
-### 2. `manufacturer_search_tool`
-- **Purpose**: Find similar manufacturer names using fuzzy matching
-- **Input**: Search query
-- **Output**: JSON list of similar manufacturers with confidence scores
-- **Usage**: Agent uses this when manufacturer names are unclear or have variations
 
 ## Testing
 
